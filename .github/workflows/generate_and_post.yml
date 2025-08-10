@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write   # needed for release creation
 
 jobs:
   build-media:
@@ -21,7 +21,7 @@ jobs:
       - name: Install FFmpeg and deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg jq
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
@@ -38,3 +38,50 @@ jobs:
           path: |
             out/images/*.jpg
             out/videos/*.mp4
+
+  create-release:
+    needs: build-media
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: media
+          path: media_all
+
+      - name: Create tag name
+        id: tag
+        run: echo "TAG=v$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release with media
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Auto media ${{ steps.tag.outputs.TAG }}"
+          tag_name: ${{ steps.tag.outputs.TAG }}
+          draft: false
+          prerelease: false
+          files: |
+            media_all/**/*.jpg
+            media_all/**/*.mp4
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  post-instagram-reels:
+    needs: create-release
+    runs-on: ubuntu-latest
+    if: ${{ secrets.IG_USER_ID != '' && secrets.IG_ACCESS_TOKEN != '' }}
+    steps:
+      - name: Get latest release MP4 URL
+        id: pick
+        run: |
+          api="https://api.github.com/repos/${{ github.repository }}/releases/latest"
+          url=$(curl -s "$api" | jq -r '.assets[] | select(.name | endswith(".mp4")) | .browser_download_url' | head -n1)
+          echo "VIDEO_URL=$url" >> $GITHUB_OUTPUT
+
+      - name: Post to Instagram Reels
+        run: |
+          curl -X POST \
+            "https://graph.facebook.com/v17.0/${{ secrets.IG_USER_ID }}/media" \
+            -F "video_url=${{ steps.pick.outputs.VIDEO_URL }}" \
+            -F "caption=Daily motivation ✨ #create #consistency" \
+            -F "access_token=${{ secrets.IG_ACCESS_TOKEN }}"
