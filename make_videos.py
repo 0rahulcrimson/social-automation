@@ -1,55 +1,51 @@
+import os
+import math
 import numpy as np
-import os, random, math
-from datetime import datetime
-from moviepy.editor import ImageClip, ColorClip, CompositeVideoClip, vfx
-from PIL import Image, ImageDraw, ImageFont
-from utils.texts import QUOTES
+from PIL import Image
+from moviepy.editor import ImageClip, concatenate_videoclips, vfx
 
-OUT_DIR = "out/videos"
-os.makedirs(OUT_DIR, exist_ok=True)
+# Input / Output paths
+IMAGES_DIR = "out/images"
+VIDEOS_DIR = "out/videos"
+os.makedirs(VIDEOS_DIR, exist_ok=True)
 
-W, H = 1080, 1920  # vertical
-D_MIN, D_MAX = 60, 90
+# Video settings
+duration = 4  # seconds per image
+final_size = (1080, 1920)  # Instagram Reels / Shorts size
 
-def load_font(size):
-    for name in ["Arial.ttf", "DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]:
-        try:
-            from PIL import ImageFont
-            return ImageFont.truetype(name, size)
-        except:
-            continue
-    return ImageFont.load_default()
+clips = []
 
-def render_quote_frame(quote: str):
-    img = Image.new("RGB", (W, H), color=(random.randint(0, 40), random.randint(0, 40), random.randint(0, 40)))
-    draw = ImageDraw.Draw(img)
-    title_font = load_font(92)
-    body_font = load_font(42)
+# Loop through images in the output folder
+for filename in sorted(os.listdir(IMAGES_DIR)):
+    if filename.lower().endswith((".jpg", ".jpeg", ".png")):
+        img_path = os.path.join(IMAGES_DIR, filename)
 
-    import textwrap
-    wrapped = "\n".join(textwrap.wrap(quote, width=18))
-    bbox = draw.multiline_textbbox((0,0), wrapped, font=title_font, align="center", spacing=10)
-    tw, th = bbox[2]-bbox[0], bbox[3]-bbox[1]
-    draw.multiline_text(((W-tw)//2, (H-th)//2 - 40), wrapped, font=title_font, fill=(245,245,245), align="center", spacing=10)
+        # Load image with Pillow
+        pil_img = Image.open(img_path).convert("RGB")
 
-    footer = "@yourhandle"
-    fw, fh = draw.textbbox((0,0), footer, font=body_font)[2:]
-    draw.text(((W - fw)//2, H - fh - 60), footer, font=body_font, fill=(230,230,230))
+        # Convert to NumPy array for MoviePy
+        clip = ImageClip(np.array(pil_img)).set_duration(duration)
 
-    return img
+        # Resize slightly larger for subtle motion zoom
+        clip = clip.fx(vfx.resize, 1.04).set_position(
+            lambda t: ("center", final_size[1] / 2 + 30 * math.sin(t / 2.5))
+        )
 
-for i in range(3):
-    duration = random.randint(D_MIN, D_MAX)
-    quote = random.choice(QUOTES)
-    pil_img = render_quote_frame(quote)
-    clip = ImageClip(np.array(pil_img)).set_duration(duration)
+        # Resize to final video size (using Pillow's modern resampling method)
+        clip = clip.resize(newsize=final_size)
 
-    clip = clip.fx(vfx.resize, 1.04).set_position(lambda t: ("center", H/2 + 30*math.sin(t/2.5)))
-    clip = clip.set_fps(30)
+        clips.append(clip)
 
-    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    out_path = os.path.join(OUT_DIR, f"reel_{ts}_{i}.mp4")
-    clip.write_videofile(out_path, codec="libx264", audio=False, fps=30, preset="medium", threads=2)
-    print("Saved", out_path)
+# Concatenate all image clips
+if clips:
+    final_video = concatenate_videoclips(clips, method="compose")
+    output_path = os.path.join(VIDEOS_DIR, "slideshow.mp4")
 
-print("Videos saved to", OUT_DIR)
+    # Write the final video
+    final_video.write_videofile(
+        output_path, fps=30, codec="libx264", audio=False, threads=4
+    )
+
+    print(f"Video saved to {output_path}")
+else:
+    print("No images found to make videos.")
