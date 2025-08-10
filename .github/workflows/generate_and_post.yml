@@ -2,9 +2,15 @@ name: generate-media
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "0 16 * * *" # daily at 16:00 UTC
+
+concurrency:
+  group: media-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
-  contents: write   # needed for release creation
+  contents: write # needed for creating a Release
 
 jobs:
   build-media:
@@ -51,7 +57,8 @@ jobs:
 
       - name: Create tag name
         id: tag
-        run: echo "TAG=v$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
+        run: |
+          echo "TAG=v$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release with media
         uses: softprops/action-gh-release@v2
@@ -66,11 +73,51 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  post-youtube-shorts:
+    needs: build-media
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check YouTube secrets
+        run: |
+          if [ -z "${{ secrets.YT_CLIENT_ID }}" ] || [ -z "${{ secrets.YT_CLIENT_SECRET }}" ] || [ -z "${{ secrets.YT_REFRESH_TOKEN }}" ]; then
+            echo "YouTube secrets missing, skipping."
+            exit 0
+          fi
+
+      - name: Checkout (to get scripts)
+        uses: actions/checkout@v4
+
+      - name: Download media artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: media
+          path: media_out
+
+      - name: Install YouTube client libs
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install google-api-python-client google-auth-oauthlib google-auth-httplib2
+
+      - name: Upload first reel to YouTube Shorts
+        env:
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+        run: |
+          VIDEO=$(ls -1 media_out/*.mp4 | head -n1)
+          python scripts/post_youtube.py "$VIDEO" "Daily motivation ✨ #create #consistency"
+
   post-instagram-reels:
     needs: create-release
     runs-on: ubuntu-latest
-    if: ${{ secrets.IG_USER_ID != '' && secrets.IG_ACCESS_TOKEN != '' }}
     steps:
+      - name: Check Instagram secrets
+        run: |
+          if [ -z "${{ secrets.IG_USER_ID }}" ] || [ -z "${{ secrets.IG_ACCESS_TOKEN }}" ]; then
+            echo "Instagram secrets missing, skipping."
+            exit 0
+          fi
+
       - name: Get latest release MP4 URL
         id: pick
         run: |
