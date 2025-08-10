@@ -1,4 +1,4 @@
-name: Generate Media & (Optional) Post
+name: generate-media
 
 on:
   workflow_dispatch:
