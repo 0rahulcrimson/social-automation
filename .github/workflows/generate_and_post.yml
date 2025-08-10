@@ -1,5 +1,4 @@
 name: generate-media
-
 on:
   workflow_dispatch:
   schedule:
