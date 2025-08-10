@@ -1,3 +1,4 @@
+import numpy as np
 import os, random, math
 from datetime import datetime
 from moviepy.editor import ImageClip, ColorClip, CompositeVideoClip, vfx
@@ -41,7 +42,7 @@ for i in range(3):
     duration = random.randint(D_MIN, D_MAX)
     quote = random.choice(QUOTES)
     pil_img = render_quote_frame(quote)
-    clip = ImageClip(pil_img).set_duration(duration)
+    clip = ImageClip(np.array(pil_img)).set_duration(duration)
 
     clip = clip.fx(vfx.resize, 1.04).set_position(lambda t: ("center", H/2 + 30*math.sin(t/2.5)))
     clip = clip.set_fps(30)
