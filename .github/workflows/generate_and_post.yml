@@ -101,4 +101,5 @@ jobs:
           YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
           YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
         run: |
-          VIDEO=$(ls -1 media_out/*.mp4 | head -*_
+          VIDEO=$(ls -1 media_out/*.mp4 | head -n1)
+          python scripts/post_youtube.py "$VIDEO" "Daily motivation ✨ #create #consistency"
