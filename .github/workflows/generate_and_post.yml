@@ -1,15 +1,10 @@
 name: generate-media
+
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 16 * * *"   # daily at 16:00 UTC
-
-concurrency:
-  group: media-${{ github.ref }}
-  cancel-in-progress: false
 
 permissions:
-  contents: write  # needed for creating a Release
+  contents: read
 
 jobs:
   build-media:
@@ -23,13 +18,10 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install FFmpeg (and jq for later jobs)
+      - name: Install FFmpeg and deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg jq
-
-      - name: Install Python deps
-        run: |
+          sudo apt-get install -y ffmpeg
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
@@ -46,59 +38,3 @@ jobs:
           path: |
             out/images/*.jpg
             out/videos/*.mp4
-
-  create-release:
-    needs: build-media
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: media
-          path: media_all
-
-      - name: Create tag name
-        id: tag
-        run: |
-          echo "TAG=v$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
-
-      - name: Create GitHub Release with media
-        uses: softprops/action-gh-release@v2
-        with:
-          name: "Auto media ${{ steps.tag.outputs.TAG }}"
-          tag_name: ${{ steps.tag.outputs.TAG }}
-          draft: false
-          prerelease: false
-          files: |
-            media_all/**/*.jpg
-            media_all/**/*.mp4
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  post-youtube-shorts:
-    needs: build-media
-    runs-on: ubuntu-latest
-    if: ${{ secrets.YT_CLIENT_ID != '' && secrets.YT_CLIENT_SECRET != '' && secrets.YT_REFRESH_TOKEN != '' }}
-    steps:
-      - name: Checkout (to get scripts)
-        uses: actions/checkout@v4
-
-      - name: Download media artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: media
-          path: media_out
-
-      - name: Install YouTube client libs
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install google-api-python-client google-auth-oauthlib google-auth-httplib2
-
-      - name: Upload first reel to YouTube Shorts
-        env:
-          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
-          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
-          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
-        run: |
-          VIDEO=$(ls -1 media_out/*.mp4 | head -n1)
-          python scripts/post_youtube.py "$VIDEO" "Daily motivation ✨ #create #consistency"
