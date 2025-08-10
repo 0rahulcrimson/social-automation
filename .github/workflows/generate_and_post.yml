@@ -3,37 +3,33 @@ name: Generate Media & (Optional) Post
 on:
   workflow_dispatch:
   schedule:
-    # 11:00 AM America/Chicago daily (16:00 UTC)
-    - cron: "0 16 * * *"
+    - cron: "0 9 * * *"
+    - cron: "0 15 * * *"
+    - cron: "0 21 * * *"
+
+concurrency:
+  group: media-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build-media:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
       - name: Install FFmpeg
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
-
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-
       - name: Generate images
         run: python make_images.py
-
       - name: Generate videos
         run: python make_videos.py
-
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -42,36 +38,60 @@ jobs:
             out/images/*.jpg
             out/videos/*.mp4
 
-  post-youtube-shorts:
+  create-release:
     needs: build-media
     runs-on: ubuntu-latest
-    if: ${{ secrets.YT_CLIENT_ID && secrets.YT_CLIENT_SECRET && secrets.YT_REFRESH_TOKEN }}
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with: { name: media, path: media_all }
+      - name: Make tag
+        id: tag
+        run: echo "TAG=v$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
+      - name: Create GitHub Release with media
+        uses: softprops/action-gh-release@v2
         with:
-          name: media
-          path: media_out
-      - name: Upload to YouTube Shorts
-        env:
-          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
-          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
-          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
-        run: |
-          python -m pip install google-api-python-client google-auth-oauthlib google-auth-httplib2
-          python scripts/post_youtube.py "media_out/videos/reel_0.mp4" "Daily motivation ✨ #create #consistency"
+          name: "Auto media ${{ steps.tag.outputs.TAG }}"
+          tag_name: "${{ steps.tag.outputs.TAG }}"
+          draft: false
+          prerelease: false
+          files: |
+            media_all/**/*.jpg
+            media_all/**/*.mp4
 
   post-instagram-reels:
-    needs: build-media
+    needs: create-release
     runs-on: ubuntu-latest
     if: ${{ secrets.IG_USER_ID && secrets.IG_ACCESS_TOKEN }}
     steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: media
-          path: media_out
-      - name: Upload to Instagram (placeholder)
+      - name: Find one MP4 URL from latest release
+        id: findurl
+        run: |
+          api="https://api.github.com/repos/${{ github.repository }}/releases/latest"
+          url=$(curl -s "$api" | jq -r '.assets[] | select(.name | endswith(".mp4")) | .browser_download_url' | head -n1)
+          echo "VIDEO_URL=$url" >> $GITHUB_OUTPUT
+      - name: Create IG container
+        id: container
         env:
           IG_USER_ID: ${{ secrets.IG_USER_ID }}
           IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
         run: |
-          python scripts/post_instagram.py "media_out/videos/reel_0.mp4" "Daily motivation ✨ #create #consistency"
+          CAPTION="Daily motivation ✨ #create #consistency"
+          resp=$(curl -s -X POST \
+            -F "media_type=VIDEO" \
+            -F "video_url=${{ steps.findurl.outputs.VIDEO_URL }}" \
+            -F "caption=$CAPTION" \
+            "https://graph.facebook.com/v21.0/$IG_USER_ID/media?access_token=$IG_ACCESS_TOKEN")
+          echo "$resp"
+          echo "CREATION_ID=$(echo "$resp" | jq -r '.id')" >> $GITHUB_OUTPUT
+      - name: Wait a bit for IG processing
+        run: sleep 60
+      - name: Publish IG container
+        env:
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+        run: |
+          curl -s -X POST \
+            "https://graph.facebook.com/v21.0/$IG_USER_ID/media_publish?creation_id=${{ steps.container.outputs.CREATION_ID }}&access_token=$IG_USER_ID|$IG_ACCESS_TOKEN" || \
+          curl -s -X POST \
+            "https://graph.facebook.com/v21.0/$IG_USER_ID/media_publish?creation_id=${{ steps.container.outputs.CREATION_ID }}&access_token=$IG_ACCESS_TOKEN"
